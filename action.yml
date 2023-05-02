@@ -1,0 +1,66 @@
+name: "datawise-aws-build-generic-docker"
+description: "datawise AWS build and push generic container"
+inputs:
+  PROJECT:
+    required: true
+  APP:
+    required: true
+  SERVICE:
+    required: true
+  INSTANCE:
+    required: true
+  VERSION:
+    required: true
+  AWS_ACCESS:
+    required: true
+  AWS_SECRET:
+    required: true
+  AWS_ZONE:
+    required: false
+    default:  us-east-1
+  QEMU_SETUP:
+    required: false
+    default: "true"
+outputs:
+  images:
+    description: "tagged images"
+    value: "${{ steps.set_outputs.outputs.IMAGES }}"
+runs:
+  using: "composite"
+  steps:
+    - name: Set up QEMU
+      uses: docker/setup-qemu-action@v1
+      if: ${{ inputs.QEMU_SETUP == 'true' }}
+
+    - name: setup docker context for buildx
+      id: buildx-context
+      shell: bash
+      run: |
+        docker context create builders || true
+      if: ${{ inputs.QEMU_SETUP == 'true' }}
+
+    - name: Checkout repo
+      uses: actions/checkout@v3
+
+    - name: Configure AWS credentials
+      uses: aws-actions/configure-aws-credentials@v2
+      with:
+        aws-access-key-id: ${{ inputs.AWS_ACCESS }}
+        aws-secret-access-key: ${{ inputs.AWS_SECRET }}
+        aws-region: ${{ inputs.AWS_ZONE }}
+        # role-to-assume: arn:aws:iam::123456789012:role/my-github-actions-role
+
+    - name: Login to Amazon ECR
+      id: login-ecr
+      uses: aws-actions/amazon-ecr-login@v1
+
+    - name: Build, tag, and push docker image to Amazon ECR
+      env:
+        REGISTRY: ${{ steps.login-ecr.outputs.registry }}
+        REPOSITORY: ${{ inputs.PROJECT }}-${{ inputs.APP }}-${{ inputs.SERVICE }}-${{ inputs.INSTANCE }}
+        IMAGE_TAG: ${{ inputs.VERSION }}
+      shell: bash
+      run: |
+        docker build -t $REGISTRY/$REPOSITORY:$IMAGE_TAG  -t $REGISTRY/$REPOSITORY:latest  .
+        docker push $REGISTRY/$REPOSITORY:$IMAGE_TAG
+        docker push $REGISTRY/$REPOSITORY:latest
