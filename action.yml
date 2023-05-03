@@ -24,7 +24,7 @@ inputs:
 outputs:
   tagged_image:
     description: "tagged image"
-    value: "${{ steps.set_outputs.outputs.tagged_image }}"  
+    value: "${{ steps.set_outputs.outputs.tagged_image }}"
 runs:
   using: "composite"
   steps:
@@ -42,13 +42,13 @@ runs:
     - name: Checkout repo
       uses: actions/checkout@v3
 
+
     - name: Configure AWS credentials
       uses: aws-actions/configure-aws-credentials@v2
       with:
         aws-access-key-id: ${{ inputs.AWS_ACCESS }}
         aws-secret-access-key: ${{ inputs.AWS_SECRET }}
         aws-region: ${{ inputs.AWS_ZONE }}
-        # role-to-assume: arn:aws:iam::123456789012:role/my-github-actions-role
 
     - name: Login to Amazon ECR
       id: login-ecr
@@ -58,7 +58,7 @@ runs:
       id: meta
       uses: docker/metadata-action@v3
       with:
-        images: ${{ inputs.PROJECT }}.${{ inputs.DOCKER_REPOSITORY_BASE }}/${{ inputs.APP }}-${{ inputs.SERVICE }}-${{ inputs.INSTANCE }}
+        images: ${{ steps.login-ecr.outputs.registry }}/${{ inputs.PROJECT }}-${{ inputs.APP }}-${{ inputs.SERVICE }}-${{ inputs.INSTANCE }}
         flavor: |
           latest=true
         tags: |
@@ -69,17 +69,15 @@ runs:
           type=semver,pattern={{version}}
           type=sha
 
-    - name: Build, tag, and push docker image to Amazon ECR
-      env:
-        REGISTRY: ${{ steps.login-ecr.outputs.registry }}
-        REPOSITORY: ${{ inputs.PROJECT }}-${{ inputs.APP }}-${{ inputs.SERVICE }}-${{ inputs.INSTANCE }}
-        IMAGE_TAG: ${{ steps.meta.outputs.tags }}
-      shell: bash
-      run: |
-        docker build -t $REGISTRY/$REPOSITORY:$IMAGE_TAG  -t $REGISTRY/$REPOSITORY:latest  .  --cache-from ${{ inputs.PROJECT }}.${{ inputs.DOCKER_REPOSITORY_BASE }}/${{ inputs.APP }}-${{ inputs.SERVICE }}-${{ inputs.INSTANCE }}:latest
-        docker push $REGISTRY/$REPOSITORY:$IMAGE_TAG
-        docker push $REGISTRY/$REPOSITORY:latest
-
+    - name: Build and push
+      id: docker_build
+      uses: docker/build-push-action@v2
+      with:
+        context: .
+        push: ${{ github.event_name != 'pull_request' }}
+        tags: ${{ steps.meta.outputs.tags }}
+        cache-from:
+          ${{ steps.login-ecr.outputs.registry }}/${{ inputs.PROJECT }}-${{ inputs.APP }}-${{ inputs.SERVICE }}-${{ inputs.INSTANCE }}:latest
 
     - name: set outputs
       env:
@@ -90,3 +88,8 @@ runs:
       shell: bash
       run: |
         echo "tagged_image=${{ env.REGISTRY}}/${{ env.REPOSITORY }}:${{ env.IMAGE_TAG }}" >> $GITHUB_OUTPUT
+
+    - name: print tags
+      shell: bash
+      run: |
+        echo ${{ steps.set_outputs.outputs.tagged_image }}
