@@ -21,6 +21,10 @@ inputs:
   QEMU_SETUP:
     required: false
     default: "true"
+outputs:
+  tagged_image:
+    description: "tagged image"
+    value: "${{ steps.set_outputs.outputs.tagged_image }}"  
 runs:
   using: "composite"
   steps:
