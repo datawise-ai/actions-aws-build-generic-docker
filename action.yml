@@ -50,16 +50,32 @@ runs:
       id: login-ecr
       uses: aws-actions/amazon-ecr-login@v1
 
+    - name: Docker meta
+      id: meta
+      uses: docker/metadata-action@v3
+      with:
+        images: ${{ inputs.PROJECT }}.${{ inputs.DOCKER_REPOSITORY_BASE }}/${{ inputs.APP }}-${{ inputs.SERVICE }}-${{ inputs.INSTANCE }}
+        flavor: |
+          latest=true
+        tags: |
+          type=ref,event=branch
+          type=ref,event=pr
+          type=ref,event=tag
+          type=raw,value=${{ inputs.VERSION }}
+          type=semver,pattern={{version}}
+          type=sha
+
     - name: Build, tag, and push docker image to Amazon ECR
       env:
         REGISTRY: ${{ steps.login-ecr.outputs.registry }}
         REPOSITORY: ${{ inputs.PROJECT }}-${{ inputs.APP }}-${{ inputs.SERVICE }}-${{ inputs.INSTANCE }}
-        IMAGE_TAG: ${{ inputs.VERSION }}
+        IMAGE_TAG: ${{ steps.meta.outputs.tags }}
       shell: bash
       run: |
-        docker build -t $REGISTRY/$REPOSITORY:$IMAGE_TAG  -t $REGISTRY/$REPOSITORY:latest  .
+        docker build -t $REGISTRY/$REPOSITORY:$IMAGE_TAG  -t $REGISTRY/$REPOSITORY:latest  .  --cache-from ${{ inputs.PROJECT }}.${{ inputs.DOCKER_REPOSITORY_BASE }}/${{ inputs.APP }}-${{ inputs.SERVICE }}-${{ inputs.INSTANCE }}:latest
         docker push $REGISTRY/$REPOSITORY:$IMAGE_TAG
         docker push $REGISTRY/$REPOSITORY:latest
+
 
     - name: set outputs
       env:
