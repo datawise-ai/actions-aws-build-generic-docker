@@ -21,6 +21,16 @@ inputs:
   QEMU_SETUP:
     required: false
     default: "true"
+  CONTEXT:
+    required: false
+    default: "."
+  FILE:
+    required: false
+    default: "Dockerfile"
+  NO_CACHE:
+    default: "true"
+  CHECKOUT:
+    default: "true"
 outputs:
   tagged_image:
     description: "tagged image"
@@ -28,23 +38,26 @@ outputs:
 runs:
   using: "composite"
   steps:
+    - name: Checkout repo
+      if: ${{ inputs.CHECKOUT == 'true' }}
+      uses: actions/checkout@v3
+
     - name: Set up QEMU
-      uses: docker/setup-qemu-action@v1
       if: ${{ inputs.QEMU_SETUP == 'true' }}
+      uses: docker/setup-qemu-action@v3
+
+    - name: Set up Docker Buildx
+      uses: docker/setup-buildx-action@v2
 
     - name: setup docker context for buildx
+      if: ${{ inputs.QEMU_SETUP == 'true' }}
       id: buildx-context
       shell: bash
       run: |
         docker context create builders || true
-      if: ${{ inputs.QEMU_SETUP == 'true' }}
-
-    - name: Checkout repo
-      uses: actions/checkout@v3
-
 
     - name: Configure AWS credentials
-      uses: aws-actions/configure-aws-credentials@v2
+      uses: aws-actions/configure-aws-credentials@v4
       with:
         aws-access-key-id: ${{ inputs.AWS_ACCESS }}
         aws-secret-access-key: ${{ inputs.AWS_SECRET }}
@@ -52,11 +65,11 @@ runs:
 
     - name: Login to Amazon ECR
       id: login-ecr
-      uses: aws-actions/amazon-ecr-login@v1
+      uses: aws-actions/amazon-ecr-login@v2
 
     - name: Docker meta
       id: meta
-      uses: docker/metadata-action@v3
+      uses: docker/metadata-action@v5
       with:
         images: ${{ steps.login-ecr.outputs.registry }}/${{ inputs.PROJECT }}-${{ inputs.APP }}-${{ inputs.SERVICE }}-${{ inputs.INSTANCE }}
         flavor: |
@@ -65,19 +78,68 @@ runs:
           type=ref,event=branch
           type=ref,event=pr
           type=ref,event=tag
-          type=raw,value=${{ inputs.VERSION }}
           type=semver,pattern={{version}}
+          type=raw,value={{date 'YYYYMMDD'}}
           type=sha
+#          type=raw,value=${{ inputs.VERSION }}
 
-    - name: Build and push
-      id: docker_build
-      uses: docker/build-push-action@v2
+    - name: send info to summary
+      id: echo2summary
+      shell: bash
+      run: |
+          echo ''  >> $GITHUB_STEP_SUMMARY
+          echo ":rocket: action docker generic in aws :rocket:"  >>  $GITHUB_STEP_SUMMARY
+          echo ''  >> $GITHUB_STEP_SUMMARY
+          echo '| Variable | Value |'                        >> $GITHUB_STEP_SUMMARY
+          echo '| :---: | :---: | '                          >> $GITHUB_STEP_SUMMARY
+          echo '| ref | ${{ github.ref }} | '                >> $GITHUB_STEP_SUMMARY
+          echo '| ENV_GROUP | ${{ inputs.PROJECT }}-${{ inputs.DEPLOY_TARGET }} | '           >> $GITHUB_STEP_SUMMARY
+          echo '| PROJECT | ${{ inputs.PROJECT }} | '           >> $GITHUB_STEP_SUMMARY
+          echo '| APP | ${{ inputs.APP }} | '   >> $GITHUB_STEP_SUMMARY
+          echo '| SERVICE | ${{ inputs.SERVICE }} | '   >> $GITHUB_STEP_SUMMARY
+          echo '| INSTANCE | ${{ inputs.INSTANCE }} | '   >> $GITHUB_STEP_SUMMARY
+          echo '| BRANCH | ${{ github.ref_name }} | ' >> $GITHUB_STEP_SUMMARY
+          echo '| DEPLOY_TARGET | ${{ inputs.DEPLOY_TARGET }} | '           >> $GITHUB_STEP_SUMMARY
+          echo '| AWS_ACCESS | ${{ inputs.AWS_ACCESS }} | '           >> $GITHUB_STEP_SUMMARY
+          echo '| AWS_ZONE | ${{ inputs.AWS_ZONE }} | '           >> $GITHUB_STEP_SUMMARY
+          echo '| QEMU_SETUP | ${{ inputs.QEMU_SETUP }} | '           >> $GITHUB_STEP_SUMMARY
+          echo '| CONTEXT | ${{ inputs.CONTEXT }} | '           >> $GITHUB_STEP_SUMMARY
+          echo '| FILE | ${{ inputs.FILE }} | '           >> $GITHUB_STEP_SUMMARY
+          echo '| TO_IMAGE | ${{ steps.login-ecr.outputs.registry }}/${{ inputs.PROJECT }}-${{ inputs.APP }}-${{ inputs.SERVICE }}-${{ inputs.INSTANCE }} | '           >> $GITHUB_STEP_SUMMARY
+          echo '| RUN_BEFORE_BUILD | ${{ inputs.RUN_BEFORE_BUILD }} | '           >> $GITHUB_STEP_SUMMARY
+          export TAGS_WITH_NEWLINES="${{ steps.meta.outputs.tags }}"
+          for ATAG in  $( echo ${TAGS_WITH_NEWLINES} | tr '\n' ' ' ) ; do
+          echo "| TAGS | ${ATAG} | "           >> $GITHUB_STEP_SUMMARY
+          echo "| TAGS | ${ATAG} | "        
+          done
+          echo '| NO_CACHE | ${{ inputs.NO_CACHE }} | '           >> $GITHUB_STEP_SUMMARY
+          echo ' '           >> $GITHUB_STEP_SUMMARY
+          echo ' '           >> $GITHUB_STEP_SUMMARY
+          [[ -f "${{ inputs.CONTEXT }}/${{ inputs.FILE }}" ]]  && (echo "* content - ${{ inputs.CONTEXT }}/${{ inputs.FILE }}" ; echo "\`\`\`" ; cat ${{ inputs.CONTEXT }}/${{ inputs.FILE }} ; echo "\`\`\`" ) >> $GITHUB_STEP_SUMMARY
+    
+    - name: Build and push - NO CACHE
+      if: ${{ inputs.NO_CACHE == 'true' }}
+      id: docker_build_cached
+      uses: docker/build-push-action@v5
       with:
-        context: .
-        push: ${{ github.event_name != 'pull_request' }}
+        context: ${{ inputs.CONTEXT }}
+        file: ${{ inputs.FILE }}
+        push: true
+        tags: ${{ steps.tags_for_docker.outputs.tags }}
+        no-cache: true 
+    
+    - name: Build and push  WITH CACHE
+      if: ${{ inputs.NO_CACHE == 'GHA' }}
+      id: docker_build_no_cache
+      uses: docker/build-push-action@v5
+      with:
+        context: ${{ inputs.CONTEXT }}
+        file: ${{ inputs.FILE }}
+        push: true
         tags: ${{ steps.meta.outputs.tags }}
-        cache-from:
-          ${{ steps.login-ecr.outputs.registry }}/${{ inputs.PROJECT }}-${{ inputs.APP }}-${{ inputs.SERVICE }}-${{ inputs.INSTANCE }}:latest
+        no-cache: false 
+        cache-from: type=gha
+        cache-to: type=gha
 
     - name: set outputs
       env:
