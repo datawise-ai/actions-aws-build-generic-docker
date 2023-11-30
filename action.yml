@@ -35,6 +35,13 @@ outputs:
   tagged_image:
     description: "tagged image"
     value: "${{ steps.set_outputs.outputs.tagged_image }}"
+  shaonly:
+    description: "all tags"
+    value: "${{ steps.set_outputs.outputs.shaonly }}"
+  shaimg:
+    description: "all tags"
+    value: "${{ steps.set_outputs.outputs.shaimg }}"
+
 runs:
   using: "composite"
   steps:
@@ -83,6 +90,26 @@ runs:
           type=sha
 #          type=raw,value=${{ inputs.VERSION }}
 
+
+    - name: Docker meta
+      id: outshaonly
+      uses: docker/metadata-action@v5
+      with:
+        flavor: |
+          latest=false
+        tags: |
+          type=sha
+
+    - name: Docker meta
+      id: outshaimg
+      uses: docker/metadata-action@v5
+      with:
+        images: ${{ steps.login-ecr.outputs.registry }}/${{ inputs.PROJECT }}-${{ inputs.APP }}-${{ inputs.SERVICE }}-${{ inputs.INSTANCE }}
+        flavor: |
+          latest=false
+        tags: |
+          type=sha
+
     - name: send info to summary
       id: echo2summary
       shell: bash
@@ -110,13 +137,13 @@ runs:
           export TAGS_WITH_NEWLINES="${{ steps.meta.outputs.tags }}"
           for ATAG in  $( echo ${TAGS_WITH_NEWLINES} | tr '\n' ' ' ) ; do
           echo "| TAGS | ${ATAG} | "           >> $GITHUB_STEP_SUMMARY
-          echo "| TAGS | ${ATAG} | "        
+          echo "| TAGS | ${ATAG} | "
           done
           echo '| NO_CACHE | ${{ inputs.NO_CACHE }} | '           >> $GITHUB_STEP_SUMMARY
           echo ' '           >> $GITHUB_STEP_SUMMARY
           echo ' '           >> $GITHUB_STEP_SUMMARY
           [[ -f "${{ inputs.CONTEXT }}/${{ inputs.FILE }}" ]]  && (echo "* content - ${{ inputs.CONTEXT }}/${{ inputs.FILE }}" ; echo "\`\`\`" ; cat ${{ inputs.CONTEXT }}/${{ inputs.FILE }} ; echo "\`\`\`" ) >> $GITHUB_STEP_SUMMARY
-    
+
     - name: Build and push - NO CACHE
       if: ${{ inputs.NO_CACHE == 'true' }}
       id: docker_build_cached
@@ -125,9 +152,9 @@ runs:
         context: ${{ inputs.CONTEXT }}
         file: ${{ inputs.FILE }}
         push: true
-        tags: ${{ steps.tags_for_docker.outputs.tags }}
-        no-cache: true 
-    
+        tags: ${{ steps.meta.outputs.tags }}
+        no-cache: true
+
     - name: Build and push  WITH CACHE
       if: ${{ inputs.NO_CACHE == 'GHA' }}
       id: docker_build_no_cache
@@ -137,7 +164,7 @@ runs:
         file: ${{ inputs.FILE }}
         push: true
         tags: ${{ steps.meta.outputs.tags }}
-        no-cache: false 
+        no-cache: false
         cache-from: type=gha
         cache-to: type=gha
 
@@ -150,8 +177,14 @@ runs:
       shell: bash
       run: |
         echo "tagged_image=${{ env.REGISTRY}}/${{ env.REPOSITORY }}:${{ env.IMAGE_TAG }}" >> $GITHUB_OUTPUT
+        echo "shaonly=${{ steps.outshaonly.outputs.tags }}" >> $GITHUB_OUTPUT
+        echo "shaimg=${{ steps.outshaimg.outputs.tags }}" >> $GITHUB_OUTPUT
 
     - name: print tags
       shell: bash
       run: |
         echo ${{ steps.set_outputs.outputs.tagged_image }}
+        echo shaonly
+        echo ${{ steps.set_outputs.outputs.shaonly }}
+        echo shaimg
+        echo ${{ steps.set_outputs.outputs.shaimg }}
